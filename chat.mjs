@@ -56,6 +56,28 @@ const MODELS = [
 ];
 const PROFILE = join(dirname(fileURLToPath(import.meta.url)), ".chrome");
 const HEADLESS = process.env.HEADLESS === "1";
+
+function parseProxy(raw) {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw.includes("://") ? raw : `http://${raw}`);
+    if (!u.hostname) return null;
+    const scheme = (u.protocol || "http:").replace(":", "") || "http";
+    const port = u.port || (scheme === "https" ? "443" : scheme.startsWith("socks") ? "1080" : "80");
+    const server = `${scheme}://${u.hostname}:${port}`;
+    const auth = u.username
+      ? {
+          username: decodeURIComponent(u.username),
+          password: decodeURIComponent(u.password || ""),
+        }
+      : null;
+    return { server, auth };
+  } catch {
+    return null;
+  }
+}
+
+const PROXY = parseProxy(process.env.PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "");
 const JSA_SRCDOC =
   '<!DOCTYPE html>\n<html>\n<head>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\';">\n</head>\n<body></body>\n</html>';
 mkdirSync(PROFILE, { recursive: true });
@@ -106,6 +128,7 @@ async function launchChrome() {
   if (process.platform !== "win32") {
     args.push("--no-sandbox", "--disable-dev-shm-usage");
   }
+  if (PROXY) args.push(`--proxy-server=${PROXY.server}`);
   return puppeteer.launch({
     executablePath: CHROME,
     headless: HEADLESS,
@@ -130,6 +153,7 @@ async function browser() {
     }
   }
   page = await chrome.newPage();
+  if (PROXY?.auth) await page.authenticate(PROXY.auth);
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   });
@@ -487,6 +511,7 @@ async function serve() {
     .listen(PORT, HOST, async () => {
       console.log("Duck.ai API running");
       console.log("Chrome:", CHROME, existsSync(CHROME) ? "(found)" : "(MISSING)");
+      console.log("Proxy:", PROXY ? PROXY.server : "none");
       console.log(`  this PC:  http://127.0.0.1:${PORT}/v1`);
       for (const ip of lanIPs()) {
         console.log(`  other PC: http://${ip}:${PORT}/v1`);

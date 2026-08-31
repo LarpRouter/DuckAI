@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 function findChrome() {
-  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const envPath = process.env.CHROME_PATH;
+  if (envPath && existsSync(envPath)) return envPath;
   const candidates =
     process.platform === "win32"
       ? [
@@ -18,13 +19,26 @@ function findChrome() {
           "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
         ]
       : [
-          "/usr/bin/google-chrome-stable",
-          "/usr/bin/google-chrome",
+          "/snap/bin/chromium",
           "/usr/bin/chromium-browser",
           "/usr/bin/chromium",
-          "/snap/bin/chromium",
+          "/usr/lib/chromium-browser/chromium-browser",
+          "/usr/lib/chromium/chromium",
+          "/usr/bin/google-chrome-stable",
+          "/usr/bin/google-chrome",
         ];
-  return candidates.find((p) => existsSync(p)) || candidates[0];
+  const found = candidates.find((p) => existsSync(p));
+  if (found) return found;
+  if (process.platform !== "win32") {
+    try {
+      const which = execSync(
+        "command -v google-chrome-stable google-chrome chromium-browser chromium 2>/dev/null | head -n 1",
+        { encoding: "utf8" },
+      ).trim();
+      if (which) return which;
+    } catch {}
+  }
+  return envPath || candidates[0];
 }
 
 const CHROME = findChrome();
@@ -461,6 +475,7 @@ async function serve() {
     })
     .listen(PORT, HOST, async () => {
       console.log("Duck.ai API running");
+      console.log("Chrome:", CHROME, existsSync(CHROME) ? "(found)" : "(MISSING)");
       console.log(`  this PC:  http://127.0.0.1:${PORT}/v1`);
       for (const ip of lanIPs()) {
         console.log(`  other PC: http://${ip}:${PORT}/v1`);

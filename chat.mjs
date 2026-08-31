@@ -547,6 +547,35 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+function writeSse(res, obj) {
+  res.write(`data: ${typeof obj === "string" ? obj : JSON.stringify(obj)}\n\n`);
+}
+
+function streamCompletion(res, model, text) {
+  const id = "chatcmpl-duck";
+  const created = Math.floor(Date.now() / 1000);
+  res.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+    "access-control-allow-origin": "*",
+    "access-control-allow-headers": "content-type, authorization",
+    "access-control-allow-methods": "GET, POST, OPTIONS",
+  });
+  const chunk = (delta, finish_reason = null) => ({
+    id,
+    object: "chat.completion.chunk",
+    created,
+    model,
+    choices: [{ index: 0, delta, finish_reason }],
+  });
+  writeSse(res, chunk({ role: "assistant", content: "" }));
+  if (text) writeSse(res, chunk({ content: text }));
+  writeSse(res, chunk({}, "stop"));
+  writeSse(res, "[DONE]");
+  res.end();
+}
+
 async function serve() {
   http
     .createServer(async (req, res) => {
@@ -576,12 +605,14 @@ async function serve() {
 
       let raw = "";
       for await (const chunk of req) raw += chunk;
+      let body = {};
       try {
-        const body = JSON.parse(raw || "{}");
+        body = JSON.parse(raw || "{}");
         const model = MODELS.includes(body.model) ? body.model : DEFAULT_MODEL;
         const prompt = body.prompt || promptFromMessages(body.messages);
         if (!prompt) return json(res, 400, { error: { message: "prompt or messages required" } });
         const text = await ask(prompt, model);
+        if (body.stream) return streamCompletion(res, model, text);
         return json(res, 200, {
           id: "chatcmpl-duck",
           object: "chat.completion",
@@ -596,6 +627,9 @@ async function serve() {
           ],
         });
       } catch (err) {
+        if (body?.stream && !res.headersSent) {
+          return streamCompletion(res, body.model || DEFAULT_MODEL, `Error: ${err.message}`);
+        }
         return json(res, 500, { error: { message: err.message } });
       }
     })

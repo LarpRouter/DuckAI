@@ -1,0 +1,110 @@
+Duck.ai local API — how to use
+================================
+
+Needs: Node.js + Google Chrome
+Folder: C:\Users\alexa\OneDrive\เอกสาร\larprouter reverse engineer\duck.ai
+
+
+1) First time
+-------------
+cd "C:\Users\alexa\OneDrive\เอกสาร\larprouter reverse engineer\duck.ai"
+npm install
+
+
+2) Type in this PC (no API)
+---------------------------
+cd "C:\Users\alexa\OneDrive\เอกสาร\larprouter reverse engineer\duck.ai"
+node chat.mjs
+
+Then type your question and press Enter.
+
+/model gpt-5.6-luna
+/model gpt-5.4-mini
+/model claude-haiku-4-5
+/model mistral-small-2603
+/model tinfoil/gpt-oss-120b
+/model tinfoil/gemma4-31b
+/quit
+
+One question and exit:
+node chat.mjs "say hi"
+node chat.mjs --model claude-haiku-4-5 "say hi"
+
+
+3) Run as API (for this PC + other PCs)
+---------------------------------------
+cd "C:\Users\alexa\OneDrive\เอกสาร\larprouter reverse engineer\duck.ai"
+node chat.mjs --serve
+
+Leave this window open. Chrome stays in the background.
+It prints the URL, for example:
+  this PC:  http://127.0.0.1:8787/v1
+  other PC: http://192.168.1.23:8787/v1
+
+
+4) Ask from API
+---------------
+On THIS PC:
+curl.exe http://127.0.0.1:8787/v1/models
+curl.exe http://127.0.0.1:8787/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"gpt-5.6-luna\",\"prompt\":\"say hi\"}"
+
+On ANOTHER PC (same Wi-Fi, use the IP from step 3):
+curl.exe http://192.168.1.23:8787/v1/models
+curl.exe http://192.168.1.23:8787/v1/chat/completions -H "Content-Type: application/json" -d "{\"model\":\"gpt-5.6-luna\",\"prompt\":\"say hi\"}"
+
+OpenAI-style body:
+{
+  "model": "gpt-5.6-luna",
+  "messages": [{ "role": "user", "content": "say hi" }]
+}
+
+Simple body:
+{
+  "model": "gpt-5.6-luna",
+  "prompt": "say hi"
+}
+
+
+5) Point a router at it
+-----------------------
+Base URL this PC:  http://127.0.0.1:8787/v1
+Base URL other PC: http://YOUR-LAN-IP:8787/v1
+Any API key is fine (not checked).
+
+
+6) If other PC cannot connect
+-----------------------------
+Both PCs on same Wi-Fi.
+This PC stays on with node chat.mjs --serve running.
+
+Allow the port (admin PowerShell):
+netsh advfirewall firewall add rule name="duck-ai" dir=in action=allow protocol=TCP localport=8787
+
+
+7) If Duck.ai blocks (418)
+--------------------------
+Leave Chrome visible (default). Do not set HEADLESS=1.
+
+If you previously set it:
+Remove-Item Env:HEADLESS
+node chat.mjs
+
+For a hidden Chrome window only after chat already works:
+$env:HEADLESS="1"
+node chat.mjs --serve
+
+
+8) If Chrome already running error
+----------------------------------
+Close leftover Duck.ai Chrome windows, then run again.
+Do not start two node chat.mjs at the same time.
+
+
+9) Models
+---------
+gpt-5.6-luna
+gpt-5.4-mini
+claude-haiku-4-5
+mistral-small-2603
+tinfoil/gpt-oss-120b
+tinfoil/gemma4-31b

@@ -389,8 +389,18 @@ async function askNow(prompt, model = DEFAULT_MODEL) {
         console.log(`${model} hit ERR_INPUT_LIMIT, falling back to ${FALLBACK_MODEL}`);
         return askNow(prompt, FALLBACK_MODEL);
       }
+      if (attempt === 0) {
+        console.log("mini hit ERR_INPUT_LIMIT, resetting Chrome session");
+        try {
+          if (chrome) await chrome.close().catch(() => {});
+        } catch {}
+        page = null;
+        chrome = null;
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
       throw new Error(
-        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). This VPS IP is capped. Use gpt-5.4-mini, a short prompt, and wait a minute.",
+        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). This VPS IP/session is capped by Duck.ai. Wait 15-30 minutes, or wipe .chrome and restart. Luna will stay blocked on a datacenter IP.",
       );
     }
     if (!isChallenge || attempt === 2) {

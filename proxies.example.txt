@@ -1,0 +1,4 @@
+# Copy to proxies.txt (one proxy per line).
+# On ERR_INPUT_LIMIT Chrome is restarted on the next proxy.
+# http://user:pass@host:port
+# socks5://127.0.0.1:9050

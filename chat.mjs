@@ -1,10 +1,11 @@
 import crypto from "node:crypto";
 import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import readline from "node:readline/promises";
 import { execSync } from "node:child_process";
 import { stdin as input, stdout as output } from "node:process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
@@ -77,7 +78,90 @@ function parseProxy(raw) {
   }
 }
 
-const PROXY = parseProxy(process.env.PROXY || process.env.HTTPS_PROXY || process.env.HTTP_PROXY || "");
+function loadProxyList() {
+  const bits = [process.env.PROXY, process.env.HTTPS_PROXY, process.env.HTTP_PROXY, process.env.PROXY_LIST]
+    .filter(Boolean)
+    .flatMap((s) => String(s).split(/[\s,;]+/));
+  const file = process.env.PROXY_FILE || join(dirname(fileURLToPath(import.meta.url)), "proxies.txt");
+  if (existsSync(file)) {
+    bits.push(
+      ...readFileSync(file, "utf8")
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l && !l.startsWith("#")),
+    );
+  }
+  const seen = new Set();
+  const list = [];
+  for (const raw of bits) {
+    const p = parseProxy(raw);
+    if (!p) continue;
+    const key = `${p.server}|${p.auth?.username || ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    list.push(p);
+  }
+  return list;
+}
+
+const proxies = loadProxyList();
+let proxyIndex = 0;
+
+function currentProxy() {
+  if (!proxies.length) return null;
+  return proxies[proxyIndex % proxies.length];
+}
+
+function isLocalTor(p) {
+  return !!(p && /socks5?/i.test(p.server) && /127\.0\.0\.1|localhost/.test(p.server));
+}
+
+function torNewnym() {
+  const port = Number(process.env.TOR_CONTROL_PORT || 9051);
+  return new Promise((resolve) => {
+    const sock = net.connect(port, "127.0.0.1");
+    const t = setTimeout(() => {
+      sock.destroy();
+      resolve(false);
+    }, 2500);
+    sock.on("connect", () => {
+      sock.write('AUTHENTICATE ""\r\nSIGNAL NEWNYM\r\nQUIT\r\n');
+    });
+    sock.on("error", () => {
+      clearTimeout(t);
+      resolve(false);
+    });
+    sock.on("close", () => {
+      clearTimeout(t);
+      resolve(true);
+    });
+  });
+}
+
+async function resetBrowser() {
+  try {
+    if (chrome) await chrome.close().catch(() => {});
+  } catch {}
+  page = null;
+  chrome = null;
+}
+
+async function rotateProxy(reason) {
+  if (proxies.length > 1) {
+    proxyIndex = (proxyIndex + 1) % proxies.length;
+    console.log("Rotated proxy ->", currentProxy().server, `(${reason})`);
+  } else if (isLocalTor(currentProxy())) {
+    const ok = await torNewnym();
+    console.log(ok ? "Tor new circuit" : "Tor control port 9051 not open", `(${reason})`);
+    await new Promise((r) => setTimeout(r, ok ? 3000 : 1000));
+  } else {
+    console.log("No extra proxy to rotate", `(${reason})`);
+  }
+  journeyId = crypto.randomUUID().replace(/-/g, "");
+  pendingHash = null;
+  await resetBrowser();
+}
+
 const JSA_SRCDOC =
   '<!DOCTYPE html>\n<html>\n<head>\n<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\';">\n</head>\n<body></body>\n</html>';
 mkdirSync(PROFILE, { recursive: true });
@@ -128,7 +212,8 @@ async function launchChrome() {
   if (process.platform !== "win32") {
     args.push("--no-sandbox", "--disable-dev-shm-usage");
   }
-  if (PROXY) args.push(`--proxy-server=${PROXY.server}`);
+  const proxy = currentProxy();
+  if (proxy) args.push(`--proxy-server=${proxy.server}`);
   return puppeteer.launch({
     executablePath: CHROME,
     headless: HEADLESS,
@@ -153,7 +238,8 @@ async function browser() {
     }
   }
   page = await chrome.newPage();
-  if (PROXY?.auth) await page.authenticate(PROXY.auth);
+  const proxy = currentProxy();
+  if (proxy?.auth) await page.authenticate(proxy.auth);
   await page.evaluateOnNewDocument(() => {
     Object.defineProperty(navigator, "webdriver", { get: () => undefined });
   });
@@ -237,9 +323,10 @@ function formatChallengeError(body) {
 }
 
 async function askNow(prompt, model = DEFAULT_MODEL) {
-  const p = await browser();
   let lastBody = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const maxAttempts = Math.max(3, Math.min(proxies.length + 1, 6));
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const p = await browser();
     const challengeFromStatus = pendingHash;
     pendingHash = null;
     const result = await p.evaluate(
@@ -413,18 +500,18 @@ async function askNow(prompt, model = DEFAULT_MODEL) {
         console.log(`${model} hit ERR_INPUT_LIMIT, falling back to ${FALLBACK_MODEL}`);
         return askNow(prompt, FALLBACK_MODEL);
       }
+      if (attempt < maxAttempts - 1 && (proxies.length || isLocalTor(currentProxy()))) {
+        await rotateProxy("ERR_INPUT_LIMIT");
+        continue;
+      }
       if (attempt === 0) {
         console.log("mini hit ERR_INPUT_LIMIT, resetting Chrome session");
-        try {
-          if (chrome) await chrome.close().catch(() => {});
-        } catch {}
-        page = null;
-        chrome = null;
+        await resetBrowser();
         await new Promise((r) => setTimeout(r, 2000));
         continue;
       }
       throw new Error(
-        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). This VPS IP/session is capped by Duck.ai. Wait 15-30 minutes, or wipe .chrome and restart. Luna will stay blocked on a datacenter IP.",
+        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). This IP/session is capped. Rotate via PROXY_LIST or Tor, or wait. Luna is often blocked on datacenter/Tor exits.",
       );
     }
     if (!isChallenge || attempt === 2) {
@@ -511,7 +598,8 @@ async function serve() {
     .listen(PORT, HOST, async () => {
       console.log("Duck.ai API running");
       console.log("Chrome:", CHROME, existsSync(CHROME) ? "(found)" : "(MISSING)");
-      console.log("Proxy:", PROXY ? PROXY.server : "none");
+      const proxy = currentProxy();
+      console.log("Proxy:", proxy ? `${proxy.server} (${proxies.length} in pool)` : "none");
       console.log(`  this PC:  http://127.0.0.1:${PORT}/v1`);
       for (const ip of lanIPs()) {
         console.log(`  other PC: http://${ip}:${PORT}/v1`);

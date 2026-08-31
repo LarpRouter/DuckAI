@@ -284,6 +284,7 @@ function parseReply(sse) {
       try {
         const j = JSON.parse(data);
         if (j.message) text += j.message;
+        else if (typeof j.content === "string") text += j.content;
       } catch {}
     }
   }
@@ -465,10 +466,10 @@ async function askNow(prompt, model = DEFAULT_MODEL) {
             model,
             metadata: {
               toolChoice: {
-                NewsSearch: false,
-                VideosSearch: false,
-                LocalSearch: false,
-                WeatherForecast: false,
+                NewsSearch: true,
+                VideosSearch: true,
+                LocalSearch: true,
+                WeatherForecast: true,
               },
             },
             messages: [{ role: "user", content: prompt }],

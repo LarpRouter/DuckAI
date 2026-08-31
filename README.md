@@ -9,7 +9,7 @@ node chat.mjs --serve
 
 Point the router at:
 
-`http://127.0.0.1:8787/v1`
+
 
 Same as OpenAI: `POST /v1/chat/completions` with `model` + `messages` (or `prompt`).
 

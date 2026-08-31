@@ -3,7 +3,7 @@
 Duck.ai has no official API. This keeps **one** slim Chrome and reuses it.
 
 ```powershell
-cd "C:\Users\alexa\OneDrive\เอกสาร\larprouter reverse engineer\duck.ai"
+cd "C:\Users\\\larprouter reverse engineer\duck.ai"
 node chat.mjs --serve
 ```
 

@@ -164,17 +164,21 @@ function parseReply(sse) {
   return text;
 }
 
+function messageText(m) {
+  if (!m) return "";
+  if (typeof m.content === "string") return m.content;
+  if (Array.isArray(m.content)) {
+    return m.content.map((p) => (typeof p === "string" ? p : p?.text || "")).join("\n");
+  }
+  return "";
+}
+
 function promptFromMessages(messages) {
-  return (messages || [])
-    .map((m) => {
-      if (typeof m.content === "string") return m.content;
-      if (Array.isArray(m.content)) {
-        return m.content.map((p) => (typeof p === "string" ? p : p?.text || "")).join("\n");
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
+  const list = messages || [];
+  const lastUser = [...list].reverse().find((m) => m.role === "user");
+  const last = messageText(lastUser).trim();
+  if (last) return last;
+  return list.map(messageText).filter(Boolean).join("\n");
 }
 
 async function ask(prompt, model = DEFAULT_MODEL) {
@@ -361,7 +365,19 @@ async function askNow(prompt, model = DEFAULT_MODEL) {
     }
 
     const isChallenge = result.status === 418 || /ERR_CHALLENGE|ERR_INVALID_CHALLENGE/.test(lastBody);
+    const isInputLimit = result.status === 429 || /ERR_INPUT_LIMIT/.test(lastBody);
     pendingHash = null;
+    if (isInputLimit) {
+      journeyId = crypto.randomUUID().replace(/-/g, "");
+      if (attempt < 2) {
+        console.log("Duck.ai input/rate limit. New chat, retrying...");
+        await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
+        continue;
+      }
+      throw new Error(
+        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). Use a smaller model like gpt-5.4-mini, send a short prompt, and wait a minute.",
+      );
+    }
     if (!isChallenge || attempt === 2) {
       throw new Error(lastBody || `HTTP ${result.status}`);
     }

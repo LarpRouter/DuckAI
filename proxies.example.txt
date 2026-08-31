@@ -1,4 +1,8 @@
-# Copy to proxies.txt (one proxy per line).
-# On ERR_INPUT_LIMIT Chrome is restarted on the next proxy.
-# http://user:pass@host:port
+# Copy to proxies.txt and put YOUR proxies here, one per line.
+# The app round-robins this list on every request and on ERR_INPUT_LIMIT.
+# Public free lists are not included. They get Duck.ai-banned and can MITM Chrome.
+#
+# http://user:pass@gate1.your-provider.com:8080
+# http://user:pass@gate2.your-provider.com:8080
+# http://user:pass@gate3.your-provider.com:8080
 # socks5://127.0.0.1:9050

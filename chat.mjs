@@ -106,6 +106,7 @@ function loadProxyList() {
 
 const proxies = loadProxyList();
 let proxyIndex = 0;
+const ROTATE_EVERY = process.env.PROXY_ROTATE !== "on_error";
 
 function currentProxy() {
   if (!proxies.length) return null;
@@ -325,6 +326,9 @@ function formatChallengeError(body) {
 async function askNow(prompt, model = DEFAULT_MODEL) {
   let lastBody = "";
   const maxAttempts = Math.max(3, Math.min(proxies.length + 1, 6));
+  if (ROTATE_EVERY && (page || chrome) && (proxies.length > 1 || isLocalTor(currentProxy()))) {
+    await rotateProxy("next request");
+  }
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const p = await browser();
     const challengeFromStatus = pendingHash;

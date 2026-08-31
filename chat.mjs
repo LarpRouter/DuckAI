@@ -4,14 +4,30 @@ import os from "node:os";
 import readline from "node:readline/promises";
 import { execSync } from "node:child_process";
 import { stdin as input, stdout as output } from "node:process";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
-const CHROME =
-  process.env.CHROME_PATH ||
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+function findChrome() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const candidates =
+    process.platform === "win32"
+      ? [
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        ]
+      : [
+          "/usr/bin/google-chrome-stable",
+          "/usr/bin/google-chrome",
+          "/usr/bin/chromium-browser",
+          "/usr/bin/chromium",
+          "/snap/bin/chromium",
+        ];
+  return candidates.find((p) => existsSync(p)) || candidates[0];
+}
+
+const CHROME = findChrome();
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
 const DEFAULT_MODEL = "gpt-5.6-luna";
@@ -36,10 +52,14 @@ let pendingHash = null;
 let journeyId = crypto.randomUUID().replace(/-/g, "");
 
 function killStaleChrome() {
-  const marker = PROFILE.replace(/'/g, "''");
-  const ps = `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
   try {
-    execSync(`powershell -NoProfile -Command ${JSON.stringify(ps)}`, { stdio: "ignore" });
+    if (process.platform === "win32") {
+      const marker = PROFILE.replace(/'/g, "''");
+      const ps = `Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('${marker}') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`;
+      execSync(`powershell -NoProfile -Command ${JSON.stringify(ps)}`, { stdio: "ignore" });
+    } else {
+      execSync(`pkill -f ${JSON.stringify(PROFILE)} || true`, { stdio: "ignore" });
+    }
   } catch {}
   for (const name of ["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"]) {
     try {
@@ -49,30 +69,34 @@ function killStaleChrome() {
 }
 
 async function launchChrome() {
+  const args = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-gpu",
+    "--disable-extensions",
+    "--disable-sync",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-breakpad",
+    "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints",
+    "--disable-component-update",
+    "--disable-domain-reliability",
+    "--mute-audio",
+    "--metrics-recording-only",
+    "--renderer-process-limit=1",
+    "--js-flags=--max-old-space-size=128",
+    "--window-size=1280,800",
+  ];
+  if (process.platform !== "win32") {
+    args.push("--no-sandbox", "--disable-dev-shm-usage");
+  }
   return puppeteer.launch({
     executablePath: CHROME,
     headless: HEADLESS,
     userDataDir: PROFILE,
     ignoreDefaultArgs: ["--enable-automation"],
-    args: [
-      "--disable-blink-features=AutomationControlled",
-      "--no-first-run",
-      "--no-default-browser-check",
-      "--disable-gpu",
-      "--disable-extensions",
-      "--disable-sync",
-      "--disable-background-networking",
-      "--disable-background-timer-throttling",
-      "--disable-breakpad",
-      "--disable-features=Translate,BackForwardCache,AcceptCHFrame,MediaRouter,OptimizationHints",
-      "--disable-component-update",
-      "--disable-domain-reliability",
-      "--mute-audio",
-      "--metrics-recording-only",
-      "--renderer-process-limit=1",
-      "--js-flags=--max-old-space-size=128",
-      "--window-size=1280,800",
-    ],
+    args,
   });
 }
 

@@ -44,10 +44,11 @@ function findChrome() {
 const CHROME = findChrome();
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
-const DEFAULT_MODEL = "gpt-5.6-luna";
+const FALLBACK_MODEL = "gpt-5.4-mini";
+const DEFAULT_MODEL = process.env.DUCK_MODEL || FALLBACK_MODEL;
 const MODELS = [
-  "gpt-5.6-luna",
   "gpt-5.4-mini",
+  "gpt-5.6-luna",
   "claude-haiku-4-5",
   "mistral-small-2603",
   "tinfoil/gpt-oss-120b",
@@ -383,13 +384,13 @@ async function askNow(prompt, model = DEFAULT_MODEL) {
     pendingHash = null;
     if (isInputLimit) {
       journeyId = crypto.randomUUID().replace(/-/g, "");
-      if (attempt < 2) {
-        console.log("Duck.ai input/rate limit. New chat, retrying...");
-        await new Promise((r) => setTimeout(r, 1500 * 2 ** attempt));
-        continue;
+      pendingHash = null;
+      if (model !== FALLBACK_MODEL) {
+        console.log(`${model} hit ERR_INPUT_LIMIT, falling back to ${FALLBACK_MODEL}`);
+        return askNow(prompt, FALLBACK_MODEL);
       }
       throw new Error(
-        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). Use a smaller model like gpt-5.4-mini, send a short prompt, and wait a minute.",
+        "Duck.ai rate/input limit (ERR_INPUT_LIMIT). This VPS IP is capped. Use gpt-5.4-mini, a short prompt, and wait a minute.",
       );
     }
     if (!isChallenge || attempt === 2) {
@@ -452,7 +453,7 @@ async function serve() {
       for await (const chunk of req) raw += chunk;
       try {
         const body = JSON.parse(raw || "{}");
-        const model = body.model || DEFAULT_MODEL;
+        const model = MODELS.includes(body.model) ? body.model : DEFAULT_MODEL;
         const prompt = body.prompt || promptFromMessages(body.messages);
         if (!prompt) return json(res, 400, { error: { message: "prompt or messages required" } });
         const text = await ask(prompt, model);
